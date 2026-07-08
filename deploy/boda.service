@@ -1,0 +1,15 @@
+[Unit]
+Description=App de Boda (fotos y videos de los invitados)
+After=network.target
+
+[Service]
+Type=simple
+User=boda
+WorkingDirectory=/opt/boda
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

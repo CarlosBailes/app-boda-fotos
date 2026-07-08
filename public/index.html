@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Boda — Acceso</title>
+  <meta name="theme-color" content="#faf6f0" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Great+Vibes&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="landing container">
+    <div class="crest reveal" id="monogram">♥</div>
+
+    <div class="eyebrow reveal d1">Bienvenidos</div>
+    <h1 class="center reveal d1" id="eventTitle">Nuestra Boda</h1>
+    <div class="names center gold-text reveal d1" id="coupleNames">Los Novios</div>
+    <div class="date center reveal d1" id="eventDate" style="display:none"></div>
+    <div class="divider reveal d2"><i></i></div>
+
+    <div class="card reveal d2" style="max-width:460px; width:100%;">
+      <p class="lead center muted" style="margin-top:0">
+        Ayúdanos a revivir este día.<br/>Introduce el código de invitado para compartir tus fotos y vídeos.
+      </p>
+      <form class="code-form" id="codeForm" autocomplete="off">
+        <input class="code-input" id="codeInput" type="text" placeholder="CÓDIGO"
+               inputmode="text" autocapitalize="characters" maxlength="40" aria-label="Código de acceso" />
+        <button class="btn btn-primary btn-block" type="submit" id="enterBtn">Entrar</button>
+        <p class="msg center" id="codeMsg"></p>
+      </form>
+    </div>
+
+    <!-- Instalación / elección de plataforma -->
+    <div class="card install-card reveal d3" id="installCard" style="max-width:460px; width:100%;">
+      <h3 class="center">Lleva la app contigo</h3>
+      <div class="center">
+        <span class="os-badge" id="osBadge">Detectando dispositivo…</span>
+      </div>
+      <div id="installBody"></div>
+      <button class="btn btn-ghost btn-block" id="browserBtn" style="margin-top:14px">
+        Seguir en el navegador
+      </button>
+    </div>
+
+    <div class="foot center reveal d4">Con amor · para nuestro gran día</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/js/petals.js"></script>
+  <script src="/js/landing.js"></script>
+</body>
+</html>

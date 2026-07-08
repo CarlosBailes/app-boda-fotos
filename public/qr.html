@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Boda — Código QR</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Great+Vibes&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="qr-page container">
+    <div class="card qr-card">
+      <div class="eyebrow">Comparte tus recuerdos</div>
+      <div class="qr-names gold-text" id="qrNames">Los Novios</div>
+      <p class="muted" style="margin:.2rem 0 1.4rem; font-family:var(--serif); font-style:italic; font-size:1.05rem">
+        Escanea y sube tus fotos y vídeos de la boda
+      </p>
+      <div class="qr-frame">
+        <img id="qrImg" src="/api/qr" alt="Código QR" />
+      </div>
+      <div class="qr-code-label" style="margin-top:20px">Código de invitado</div>
+      <div class="qr-code-box" id="qrCode">SIEMPREJUNTOS</div>
+      <div class="divider" style="margin:14px auto"><i></i></div>
+      <div class="url-box" id="qrUrl">—</div>
+      <div class="no-print" style="margin-top:22px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="window.print()">Imprimir</button>
+        <a class="btn btn-ghost" href="/api/qr" download="qr-boda.png">Descargar QR</a>
+      </div>
+      <p class="muted no-print" style="font-size:.76rem; margin-top:18px; letter-spacing:.5px">
+        Consejo: imprime esta tarjeta y colócala en las mesas del banquete.
+      </p>
+    </div>
+  </div>
+  <script src="/js/petals.js"></script>
+  <script>
+    fetch('/api/qr-info').then(r => r.json()).then(d => {
+      if (d.title) document.title = d.title + ' — QR';
+      if (d.names) document.getElementById('qrNames').textContent = d.names;
+      if (d.code) document.getElementById('qrCode').textContent = d.code;
+      if (d.url) {
+        document.getElementById('qrUrl').textContent = d.url;
+        document.getElementById('qrImg').src = '/api/qr?url=' + encodeURIComponent(d.url);
+      }
+    }).catch(()=>{});
+  </script>
+</body>
+</html>

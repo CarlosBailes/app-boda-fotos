@@ -1,0 +1,30 @@
+{
+  "name": "aplicacion-boda",
+  "version": "1.0.0",
+  "description": "App de boda para que los invitados suban fotos y videos del evento (PWA)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "icons": "node scripts/generate-icons.js",
+    "setup": "node scripts/generate-icons.js"
+  },
+  "keywords": [
+    "boda",
+    "wedding",
+    "pwa",
+    "fotos",
+    "videos"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "multer": "^2.2.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "pngjs": "^7.0.0"
+  }
+}
