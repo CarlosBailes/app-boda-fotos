@@ -134,19 +134,22 @@
   }
 
   // ---- Render de items ----
-  // list + index permiten navegar con flechas dentro del visor
+  // list + index permiten navegar con flechas dentro del visor.
+  // Las baldosas usan miniaturas (~30 KB) en vez de los originales.
   function mediaTile(item, list, index) {
     const div = document.createElement('div');
     div.className = 'grid-item';
+    const thumb = item.url + '/thumb';
+    const tag = item.uploader ? `<div class="tag">${escapeHtml(item.uploader)}</div>` : '';
     if (item.type === 'video') {
+      // portada ligera del vídeo; si aún no hay miniatura, queda el fondo con el ▶
       div.innerHTML =
-        `<video src="${item.url}#t=0.1" preload="metadata" muted playsinline></video>` +
-        `<div class="play">▶</div>` +
-        (item.uploader ? `<div class="tag">${escapeHtml(item.uploader)}</div>` : '');
+        `<img src="${thumb}" loading="lazy" alt="" onerror="this.remove()" />` +
+        `<div class="play">▶</div>` + tag;
     } else {
+      // si la miniatura fallara, se recurre al original
       div.innerHTML =
-        `<img src="${item.url}" loading="lazy" alt="" />` +
-        (item.uploader ? `<div class="tag">${escapeHtml(item.uploader)}</div>` : '');
+        `<img src="${thumb}" loading="lazy" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src='${item.url}'}" />` + tag;
     }
     div.onclick = () => openLightbox(list, index);
     return div;
@@ -158,8 +161,12 @@
   }
 
   // ---- Galería ----
+  const PAGE_SIZE = 60;      // miniaturas por página (scroll infinito)
   let currentFilter = 'all';
-  let lastTotal = 0; // total conocido (para detectar recuerdos nuevos de otros)
+  let lastTotal = 0;         // total conocido (para detectar recuerdos nuevos de otros)
+  let galleryItems = [];     // lo cargado hasta ahora (lista que usa el visor)
+  let galleryTotal = 0;      // total en el servidor para el filtro actual
+  let galleryLoading = false;
   $$('.chip').forEach((c) => (c.onclick = () => {
     $$('.chip').forEach((x) => x.classList.remove('active'));
     c.classList.add('active');
@@ -177,59 +184,91 @@
     }
   }
 
-  function updateCount(items) {
+  function updateCount(data) {
     const el = $('#galleryCount');
     if (!el) return;
-    if (!items.length) { el.textContent = ''; return; }
+    const p = data.photos || 0;
+    const v = data.videos || 0;
+    if (!(p + v)) { el.textContent = ''; return; }
     if (currentFilter === 'all') {
-      const p = items.filter((i) => i.type === 'photo').length;
-      const v = items.length - p;
       el.textContent = `${p} foto${p !== 1 ? 's' : ''} · ${v} vídeo${v !== 1 ? 's' : ''}`;
     } else {
-      el.textContent = `${items.length} ${currentFilter === 'photo' ? 'foto' : 'vídeo'}${items.length !== 1 ? 's' : ''}`;
+      const n = data.total || 0;
+      el.textContent = `${n} ${currentFilter === 'photo' ? 'foto' : 'vídeo'}${n !== 1 ? 's' : ''}`;
     }
   }
 
+  // Recarga desde cero (cambio de filtro, refrescar, tras subir)
   function loadGallery() {
     const grid = $('#galleryGrid');
+    galleryItems = [];
+    galleryTotal = 0;
+    grid.innerHTML = '';
     showSkeletons(grid, 9);
-    fetch('/api/media?type=' + currentFilter, { headers: idHeaders() })
+    fetchPage(0, true);
+  }
+
+  // Trae una página de la galería y la añade al final
+  function fetchPage(offset, reset) {
+    if (galleryLoading) return;
+    galleryLoading = true;
+    fetch(`/api/media?type=${currentFilter}&limit=${PAGE_SIZE}&offset=${offset}`, { headers: idHeaders() })
       .then((r) => { if (r.status === 401) { location.href = '/'; throw new Error('401'); } return r.json(); })
       .then((data) => {
-        grid.innerHTML = '';
+        const grid = $('#galleryGrid');
+        if (reset) grid.innerHTML = '';
         const items = data.items || [];
-        $('#galleryEmpty').style.display = items.length ? 'none' : 'block';
-        updateCount(items);
-        if (currentFilter === 'all') lastTotal = items.length;
+        galleryTotal = data.total || 0;
+        updateCount(data);
+        if (currentFilter === 'all') lastTotal = galleryTotal;
+        $('#galleryEmpty').style.display = galleryTotal ? 'none' : 'block';
+        const start = galleryItems.length;
         items.forEach((it, i) => {
-          const tile = mediaTile(it, items, i);
+          galleryItems.push(it);
+          const tile = mediaTile(it, galleryItems, start + i);
           tile.style.animationDelay = Math.min(i * 35, 500) + 'ms';
           grid.appendChild(tile);
         });
         // también refresca "recién subidas" con las 9 más nuevas
-        if (currentFilter === 'all') {
+        if (reset && currentFilter === 'all') {
           const recent = $('#recentGrid');
           recent.innerHTML = '';
           items.slice(0, 9).forEach((it, i) => {
-            const tile = mediaTile(it, items, i);
+            const tile = mediaTile(it, galleryItems, i);
             tile.style.animationDelay = (i * 45) + 'ms';
             recent.appendChild(tile);
           });
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { galleryLoading = false; });
   }
   // cargar recientes al abrir
   loadGallery();
 
+  // Scroll infinito: cuando el final de la galería se acerca, trae la siguiente página
+  const sentinel = $('#gallerySentinel');
+  if (sentinel && 'IntersectionObserver' in window) {
+    new IntersectionObserver((entries) => {
+      if (
+        entries[0].isIntersecting &&
+        !galleryLoading &&
+        galleryItems.length < galleryTotal &&
+        $('#panelGallery').style.display !== 'none'
+      ) {
+        fetchPage(galleryItems.length, false);
+      }
+    }, { rootMargin: '600px' }).observe(sentinel);
+  }
+
   // ---- Galería en vivo: sondeo cada 45 s ----
   setInterval(() => {
     if (document.visibilityState !== 'visible') return;
-    fetch('/api/media?type=all')
+    fetch('/api/media?type=all&limit=1')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!data) return;
-        const total = (data.items || []).length;
+        const total = data.total || 0;
         if (total > lastTotal) {
           const nuevos = total - lastTotal;
           lastTotal = total;

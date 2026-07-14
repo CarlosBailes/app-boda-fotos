@@ -1,5 +1,5 @@
 /* Service Worker — App de Boda (PWA) */
-const CACHE = 'boda-v5';
+const CACHE = 'boda-v6';
 const SHELL = [
   '/',
   '/app',
