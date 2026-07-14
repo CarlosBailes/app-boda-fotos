@@ -325,31 +325,35 @@ app.get('/api/media', requireAuth, (req, res) => {
   res.json({ count: total, total, photos, videos, offset, items });
 });
 
-// ---------- Miniaturas (galería rápida) ----------
+// ---------- Variantes de imagen (galería y visor rápidos) ----------
+// 'thumb': miniatura cuadrada 480px para la galería (~12 KB)
+// 'view' : versión 1600px para el visor (~200 KB); solo fotos
 const THUMB_SIZE = 480;
-const thumbJobs = new Map(); // evita generar la misma miniatura dos veces a la vez
+const VIEW_SIZE = 1600;
+const variantJobs = new Map(); // evita generar la misma variante dos veces a la vez
 
-function thumbFile(filename) {
-  return path.join(THUMB_DIR, filename + '.webp');
+function variantFile(filename, kind) {
+  return path.join(THUMB_DIR, filename + (kind === 'view' ? '.view.webp' : '.webp'));
 }
 
-function ensureThumb(record) {
-  const dest = thumbFile(record.filename);
+function ensureVariant(record, kind) {
+  const dest = variantFile(record.filename, kind);
   if (fs.existsSync(dest)) return Promise.resolve(dest);
-  if (thumbJobs.has(record.filename)) return thumbJobs.get(record.filename);
+  const key = kind + ':' + record.filename;
+  if (variantJobs.has(key)) return variantJobs.get(key);
 
   const src = path.join(UPLOAD_DIR, record.filename);
   let job;
 
   if (record.type === 'photo') {
     if (!sharp) return Promise.reject(new Error('sharp no disponible'));
-    job = sharp(src)
-      .rotate() // respeta la orientación EXIF del móvil
-      .resize(THUMB_SIZE, THUMB_SIZE, { fit: 'cover' })
-      .webp({ quality: 72 })
-      .toFile(dest)
-      .then(() => dest);
+    const pipeline = sharp(src).rotate(); // respeta la orientación EXIF del móvil
+    job = (kind === 'view'
+      ? pipeline.resize(VIEW_SIZE, VIEW_SIZE, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 80 })
+      : pipeline.resize(THUMB_SIZE, THUMB_SIZE, { fit: 'cover' }).webp({ quality: 72 })
+    ).toFile(dest).then(() => dest);
   } else {
+    if (kind === 'view') return Promise.reject(new Error('el visor de vídeo usa el original'));
     // Vídeo: extraer un fotograma con ffmpeg y comprimirlo
     job = new Promise((resolve, reject) => {
       const tmp = path.join(THUMB_DIR, record.filename + '.tmp.jpg');
@@ -371,18 +375,18 @@ function ensureThumb(record) {
     });
   }
 
-  job = job.finally(() => thumbJobs.delete(record.filename));
-  thumbJobs.set(record.filename, job);
+  job = job.finally(() => variantJobs.delete(key));
+  variantJobs.set(key, job);
   return job;
 }
 
-// Miniatura de un medio (se genera la primera vez y queda cacheada en disco)
-app.get('/media/:file/thumb', requireAuth, async (req, res) => {
+// Sirve una variante, generándola la primera vez (queda cacheada en disco)
+async function serveVariant(req, res, kind) {
   const name = path.basename(req.params.file);
   const record = readMeta().find((r) => r.filename === name);
   if (!record) return res.status(404).send('No encontrado');
   try {
-    const p = await ensureThumb(record);
+    const p = await ensureVariant(record, kind);
     res.setHeader('Cache-Control', 'public, max-age=604800');
     res.sendFile(p);
   } catch (_) {
@@ -390,21 +394,27 @@ app.get('/media/:file/thumb', requireAuth, async (req, res) => {
     if (record.type === 'photo') {
       return res.sendFile(path.join(UPLOAD_DIR, name), { maxAge: '7d' });
     }
-    res.status(404).send('Sin miniatura');
+    res.status(404).send('Sin variante');
   }
-});
+}
 
-// Genera en segundo plano las miniaturas que falten (al arrancar, sin prisa)
-async function warmThumbs() {
+app.get('/media/:file/thumb', requireAuth, (req, res) => serveVariant(req, res, 'thumb'));
+app.get('/media/:file/view', requireAuth, (req, res) => serveVariant(req, res, 'view'));
+
+// Genera en segundo plano las variantes que falten (al arrancar, sin prisa)
+async function warmVariants() {
   const records = readMeta().filter((r) => fs.existsSync(path.join(UPLOAD_DIR, r.filename)));
   let done = 0, failed = 0;
-  for (const r of records) {
-    if (fs.existsSync(thumbFile(r.filename))) continue;
-    try { await ensureThumb(r); done++; } catch (_) { failed++; }
+  for (const kind of ['thumb', 'view']) {
+    for (const r of records) {
+      if (kind === 'view' && r.type !== 'photo') continue;
+      if (fs.existsSync(variantFile(r.filename, kind))) continue;
+      try { await ensureVariant(r, kind); done++; } catch (_) { failed++; }
+    }
   }
-  if (done || failed) console.log(`Miniaturas: ${done} generadas, ${failed} fallidas.`);
+  if (done || failed) console.log(`Variantes de imagen: ${done} generadas, ${failed} fallidas.`);
 }
-setTimeout(() => warmThumbs().catch(() => {}), 5000);
+setTimeout(() => warmVariants().catch(() => {}), 5000);
 
 // Eliminar un medio (solo el propio autor puede)
 app.delete('/api/media/:id', requireAuth, (req, res) => {
@@ -417,7 +427,8 @@ app.delete('/api/media/:id', requireAuth, (req, res) => {
     return res.status(403).json({ error: 'Solo puedes eliminar tus propios recuerdos.' });
   }
   try { fs.unlinkSync(path.join(UPLOAD_DIR, record.filename)); } catch (_) {}
-  try { fs.unlinkSync(thumbFile(record.filename)); } catch (_) {}
+  try { fs.unlinkSync(variantFile(record.filename, 'thumb')); } catch (_) {}
+  try { fs.unlinkSync(variantFile(record.filename, 'view')); } catch (_) {}
   rewriteMeta(records.filter((r) => r.id !== id));
   usedBytes = Math.max(0, usedBytes - (record.size || 0));
   res.json({ ok: true });

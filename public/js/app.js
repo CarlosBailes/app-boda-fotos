@@ -198,46 +198,62 @@
     }
   }
 
-  // Recarga desde cero (cambio de filtro, refrescar, tras subir)
+  // Pinta una página de datos en la galería (reset = empezar de cero)
+  function renderPage(data, reset) {
+    const grid = $('#galleryGrid');
+    if (reset) { grid.innerHTML = ''; galleryItems = []; }
+    const items = data.items || [];
+    galleryTotal = data.total || 0;
+    updateCount(data);
+    if (currentFilter === 'all') lastTotal = galleryTotal;
+    $('#galleryEmpty').style.display = galleryTotal ? 'none' : 'block';
+    const start = galleryItems.length;
+    items.forEach((it, i) => {
+      galleryItems.push(it);
+      const tile = mediaTile(it, galleryItems, start + i);
+      tile.style.animationDelay = Math.min(i * 35, 500) + 'ms';
+      grid.appendChild(tile);
+    });
+    // también refresca "recién subidas" con las 9 más nuevas
+    if (reset && currentFilter === 'all') {
+      const recent = $('#recentGrid');
+      recent.innerHTML = '';
+      items.slice(0, 9).forEach((it, i) => {
+        const tile = mediaTile(it, galleryItems, i);
+        tile.style.animationDelay = (i * 45) + 'ms';
+        recent.appendChild(tile);
+      });
+    }
+  }
+
+  // Recarga desde cero (cambio de filtro, refrescar, tras subir).
+  // Si hay una instantánea de la sesión, se pinta al momento y luego se refresca.
   function loadGallery() {
     const grid = $('#galleryGrid');
     galleryItems = [];
     galleryTotal = 0;
     grid.innerHTML = '';
-    showSkeletons(grid, 9);
+    let snap = null;
+    try { snap = JSON.parse(sessionStorage.getItem('boda_snap_' + currentFilter) || 'null'); } catch (_) {}
+    if (snap && snap.items && snap.items.length) {
+      renderPage(snap, true);
+    } else {
+      showSkeletons(grid, 9);
+    }
     fetchPage(0, true);
   }
 
-  // Trae una página de la galería y la añade al final
+  // Trae una página de la galería y la añade (o reemplaza si reset)
   function fetchPage(offset, reset) {
     if (galleryLoading) return;
     galleryLoading = true;
     fetch(`/api/media?type=${currentFilter}&limit=${PAGE_SIZE}&offset=${offset}`, { headers: idHeaders() })
       .then((r) => { if (r.status === 401) { location.href = '/'; throw new Error('401'); } return r.json(); })
       .then((data) => {
-        const grid = $('#galleryGrid');
-        if (reset) grid.innerHTML = '';
-        const items = data.items || [];
-        galleryTotal = data.total || 0;
-        updateCount(data);
-        if (currentFilter === 'all') lastTotal = galleryTotal;
-        $('#galleryEmpty').style.display = galleryTotal ? 'none' : 'block';
-        const start = galleryItems.length;
-        items.forEach((it, i) => {
-          galleryItems.push(it);
-          const tile = mediaTile(it, galleryItems, start + i);
-          tile.style.animationDelay = Math.min(i * 35, 500) + 'ms';
-          grid.appendChild(tile);
-        });
-        // también refresca "recién subidas" con las 9 más nuevas
-        if (reset && currentFilter === 'all') {
-          const recent = $('#recentGrid');
-          recent.innerHTML = '';
-          items.slice(0, 9).forEach((it, i) => {
-            const tile = mediaTile(it, galleryItems, i);
-            tile.style.animationDelay = (i * 45) + 'ms';
-            recent.appendChild(tile);
-          });
+        renderPage(data, reset);
+        // guarda la primera página como instantánea para el próximo arranque
+        if (reset) {
+          try { sessionStorage.setItem('boda_snap_' + currentFilter, JSON.stringify(data)); } catch (_) {}
         }
       })
       .catch(() => {})
@@ -297,7 +313,8 @@
     const wrap = $('#lbMedia');
     wrap.innerHTML = item.type === 'video'
       ? `<video src="${item.url}" controls autoplay playsinline></video>`
-      : `<img src="${item.url}" alt="" />`;
+      // versión "vista" (~200 KB); si fallara, se recurre al original
+      : `<img src="${item.url}/view" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src='${item.url}'}" />`;
     const date = new Date(item.uploadedAt);
     $('#lbInfo').textContent = `${item.uploader || 'Invitado'} · ${date.toLocaleString('es-ES', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}`;
     $('#lbCounter').textContent = lbList.length > 1 ? `${lbIdx + 1} / ${lbList.length}` : '';
@@ -305,9 +322,10 @@
     $('#lbDelete').style.display = item.mine ? 'inline-flex' : 'none';
     $('#lbPrev').style.visibility = lbIdx > 0 ? 'visible' : 'hidden';
     $('#lbNext').style.visibility = lbIdx < lbList.length - 1 ? 'visible' : 'hidden';
-    // precargar la siguiente imagen para que el pase sea instantáneo
-    const next = lbList[lbIdx + 1];
-    if (next && next.type === 'photo') { const im = new Image(); im.src = next.url; }
+    // precargar las fotos vecinas para que el pase sea instantáneo
+    for (const n of [lbList[lbIdx + 1], lbList[lbIdx - 1]]) {
+      if (n && n.type === 'photo') { const im = new Image(); im.src = n.url + '/view'; }
+    }
   }
 
   function lbGo(delta) {
