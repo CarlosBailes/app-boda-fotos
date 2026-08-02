@@ -8,9 +8,17 @@
     setTimeout(() => t.classList.remove('show'), 2600);
   };
 
-  // Registrar service worker (PWA)
+  // Registrar service worker (PWA) con auto-actualización
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      reg.update().catch(() => {});
+    }).catch(() => {});
+    let swReloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (swReloaded) return;
+      swReloaded = true;
+      location.reload();
+    });
   }
 
   // ---- Info del evento + si ya está autorizado ----

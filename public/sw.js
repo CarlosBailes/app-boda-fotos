@@ -1,5 +1,5 @@
 /* Service Worker — App de Boda (PWA) */
-const CACHE = 'boda-v7';
+const CACHE = 'boda-v8';
 const MEDIA_CACHE = 'boda-media-v1';
 const MEDIA_MAX = 600; // máximo de miniaturas/vistas guardadas en el dispositivo
 

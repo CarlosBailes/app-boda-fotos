@@ -8,7 +8,22 @@
     setTimeout(() => t.classList.remove('show'), 2800);
   };
 
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  // Service worker con auto-actualización: al abrir o volver a la app se buscan
+  // versiones nuevas, y cuando una toma el control se recarga una vez para estrenarla.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    }).catch(() => {});
+    let swReloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (swReloaded) return;
+      swReloaded = true;
+      location.reload();
+    });
+  }
 
   // ---- Sesión / nombre ----
   let guestName = localStorage.getItem('boda_guest') || '';
