@@ -193,8 +193,8 @@ app.post('/api/verify', (req, res) => {
     return res.status(403).json({ error: 'Código incorrecto. Inténtalo de nuevo.' });
   }
 
-  // Cookies válidas 30 días
-  const maxAge = 60 * 60 * 24 * 30;
+  // Cookies válidas 90 días (los invitados siguen subiendo semanas después)
+  const maxAge = 60 * 60 * 24 * 90;
   const cookies = [`${AUTH_COOKIE}=${AUTH_TOKEN}; Path=/; Max-Age=${maxAge}; SameSite=Lax; HttpOnly`];
   if (admin) {
     cookies.push(`${ADMIN_COOKIE}=${ADMIN_TOKEN}; Path=/; Max-Age=${maxAge}; SameSite=Lax; HttpOnly`);
@@ -230,7 +230,7 @@ app.post('/api/upload', requireAuth, (req, res) => {
     return res.status(507).json({ error: 'El almacenamiento está lleno. Avisa a los novios.' });
   }
 
-  upload.array('files', 30)(req, res, (err) => {
+  upload.array('files', 100)(req, res, (err) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(413).json({ error: `Archivo demasiado grande. Máximo ${CONFIG.MAX_UPLOAD_MB} MB.` });
@@ -332,6 +332,29 @@ const THUMB_SIZE = 480;
 const VIEW_SIZE = 1600;
 const variantJobs = new Map(); // evita generar la misma variante dos veces a la vez
 
+// Cola de generación: máximo 2 a la vez (ffmpeg/sharp) para no agotar la RAM
+// cuando alguien sube muchos vídeos de golpe.
+const GEN_MAX = 2;
+let genActive = 0;
+const genQueue = [];
+function withGenSlot(make) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      genActive++;
+      Promise.resolve()
+        .then(make)
+        .then(resolve, reject)
+        .finally(() => {
+          genActive--;
+          const next = genQueue.shift();
+          if (next) next();
+        });
+    };
+    if (genActive < GEN_MAX) run();
+    else genQueue.push(run);
+  });
+}
+
 function variantFile(filename, kind) {
   return path.join(THUMB_DIR, filename + (kind === 'view' ? '.view.webp' : '.webp'));
 }
@@ -347,15 +370,17 @@ function ensureVariant(record, kind) {
 
   if (record.type === 'photo') {
     if (!sharp) return Promise.reject(new Error('sharp no disponible'));
-    const pipeline = sharp(src).rotate(); // respeta la orientación EXIF del móvil
-    job = (kind === 'view'
-      ? pipeline.resize(VIEW_SIZE, VIEW_SIZE, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 80 })
-      : pipeline.resize(THUMB_SIZE, THUMB_SIZE, { fit: 'cover' }).webp({ quality: 72 })
-    ).toFile(dest).then(() => dest);
+    job = withGenSlot(() => {
+      const pipeline = sharp(src).rotate(); // respeta la orientación EXIF del móvil
+      return (kind === 'view'
+        ? pipeline.resize(VIEW_SIZE, VIEW_SIZE, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 80 })
+        : pipeline.resize(THUMB_SIZE, THUMB_SIZE, { fit: 'cover' }).webp({ quality: 72 })
+      ).toFile(dest).then(() => dest);
+    });
   } else {
     if (kind === 'view') return Promise.reject(new Error('el visor de vídeo usa el original'));
     // Vídeo: extraer un fotograma con ffmpeg y comprimirlo
-    job = new Promise((resolve, reject) => {
+    job = withGenSlot(() => new Promise((resolve, reject) => {
       const tmp = path.join(THUMB_DIR, record.filename + '.tmp.jpg');
       execFile(
         'ffmpeg',
@@ -372,7 +397,7 @@ function ensureVariant(record, kind) {
             .catch(reject);
         }
       );
-    });
+    }));
   }
 
   job = job.finally(() => variantJobs.delete(key));
@@ -524,7 +549,7 @@ function localIPs() {
   return ips;
 }
 
-app.listen(CONFIG.PORT, '0.0.0.0', () => {
+const server = app.listen(CONFIG.PORT, '0.0.0.0', () => {
   const ips = localIPs();
   console.log('\n  💍  App de Boda en marcha');
   console.log('  ────────────────────────────────────');
@@ -538,3 +563,8 @@ app.listen(CONFIG.PORT, '0.0.0.0', () => {
   console.log(`  Almacén:  ${(usedBytes / 1024 ** 3).toFixed(2)} GB / ${CONFIG.MAX_STORAGE_GB} GB`);
   console.log('  ────────────────────────────────────\n');
 });
+
+// Sin límite de tiempo por petición: las subidas grandes con conexión lenta
+// pueden tardar más de los 5 minutos que Node permite por defecto.
+server.requestTimeout = 0;
+server.headersTimeout = 60000;

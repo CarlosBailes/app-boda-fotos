@@ -105,47 +105,101 @@
     $('#filePhoto').value = ''; $('#fileVideo').value = '';
   }
 
-  // ---- Subida con progreso (XHR) ----
+  // ---- Subida con progreso (XHR), en tandas pequeñas ----
+  // Subir de 5 en 5 hace que carretes enteros y vídeos grandes no fallen:
+  // cada tanda es una petición corta, y si una falla las demás continúan.
+  const MAX_FILE_MB = 600; // debe coincidir con MAX_UPLOAD_MB del servidor
+  const BATCH_SIZE = 5;
+
   function uploadFiles(files, kind) {
-    const form = new FormData();
-    files.forEach((f) => form.append('files', f));
-    form.append('uploader', guestName || 'Invitado');
-    form.append('device', deviceId);
+    // avisar de archivos que superan el límite individual (no se envían)
+    const tooBig = files.filter((f) => f.size > MAX_FILE_MB * 1024 * 1024);
+    const valid = files.filter((f) => f.size <= MAX_FILE_MB * 1024 * 1024);
+    if (tooBig.length) {
+      toast(`${tooBig.length} archivo${tooBig.length > 1 ? 's' : ''} supera${tooBig.length > 1 ? 'n' : ''} los ${MAX_FILE_MB} MB y no se subirá${tooBig.length > 1 ? 'n' : ''}.`);
+    }
+    if (!valid.length) return;
+
+    const batches = [];
+    for (let i = 0; i < valid.length; i += BATCH_SIZE) batches.push(valid.slice(i, i + BATCH_SIZE));
+
+    const totalBytes = valid.reduce((s, f) => s + f.size, 0);
+    let doneBytes = 0;
+    let uploaded = 0;
+    let failed = 0;
+    let sessionOut = false;
+    const allFiles = [];
 
     const up = $('#uploader');
-    $('#upLabel').textContent = `Subiendo ${kind}${files.length > 1 ? 's' : ''}…`;
-    $('#upCount').textContent = `${files.length} archivo${files.length > 1 ? 's' : ''}`;
-    $('#upBar').style.width = '0%';
     up.classList.add('show');
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/upload');
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        const pct = Math.round((e.loaded / e.total) * 100);
-        $('#upBar').style.width = pct + '%';
-        if (pct >= 100) $('#upLabel').textContent = 'Procesando…';
-      }
-    };
-    xhr.onload = () => {
+    function updateUI(batchLoaded) {
+      const pct = Math.min(100, Math.round(((doneBytes + batchLoaded) / totalBytes) * 100));
+      $('#upBar').style.width = pct + '%';
+      $('#upLabel').textContent = `Subiendo ${kind}${valid.length > 1 ? 's' : ''}… ${pct}%`;
+      $('#upCount').textContent = `${Math.min(uploaded + failed + BATCH_SIZE, valid.length)} de ${valid.length}`;
+    }
+
+    function sendBatch(idx) {
+      if (sessionOut) return;
+      if (idx >= batches.length) return finish();
+      const batch = batches[idx];
+      const form = new FormData();
+      batch.forEach((f) => form.append('files', f));
+      form.append('uploader', guestName || 'Invitado');
+      form.append('device', deviceId);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload');
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) updateUI(e.loaded); };
+      xhr.onload = () => {
+        let res = {};
+        try { res = JSON.parse(xhr.responseText); } catch (_) {}
+        if (xhr.status === 401) {
+          sessionOut = true;
+          up.classList.remove('show');
+          toast('Tu sesión ha caducado. Vuelve a entrar con el código.');
+          setTimeout(() => (location.href = '/'), 1500);
+          return;
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && res.ok) {
+          uploaded += res.count;
+          allFiles.push(...(res.files || []));
+        } else {
+          failed += batch.length;
+          if (res && res.error) toast(res.error);
+        }
+        doneBytes += batch.reduce((s, f) => s + f.size, 0);
+        updateUI(0);
+        sendBatch(idx + 1);
+      };
+      xhr.onerror = () => {
+        failed += batch.length;
+        doneBytes += batch.reduce((s, f) => s + f.size, 0);
+        updateUI(0);
+        sendBatch(idx + 1);
+      };
+      xhr.send(form);
+    }
+
+    function finish() {
       up.classList.remove('show');
-      let res = {};
-      try { res = JSON.parse(xhr.responseText); } catch (_) {}
-      if (xhr.status >= 200 && xhr.status < 300 && res.ok) {
-        toast(`¡Subido! ${res.count} recuerdo${res.count > 1 ? 's' : ''} guardado${res.count > 1 ? 's' : ''} ✨`);
+      if (uploaded) {
+        toast(failed
+          ? `${uploaded} subido${uploaded > 1 ? 's' : ''} ✅ · ${failed} con error — vuelve a intentar esos`
+          : `¡Subido! ${uploaded} recuerdo${uploaded > 1 ? 's' : ''} guardado${uploaded > 1 ? 's' : ''} ✨`);
         celebrate();
-        prependRecent(res.files || []);
-        lastTotal += res.count; // que el sondeo no lo cuente como "nuevo de otros"
+        prependRecent(allFiles);
+        lastTotal += uploaded; // que el sondeo no lo cuente como "nuevo de otros"
         // refrescar galería si está visible
         if ($('#panelGallery').style.display !== 'none') loadGallery();
-      } else if (xhr.status === 401) {
-        toast('Tu sesión ha caducado.'); setTimeout(() => (location.href = '/'), 1200);
-      } else {
-        toast((res && res.error) || 'No se pudo subir. Inténtalo otra vez.');
+      } else if (failed) {
+        toast('No se pudo subir. Revisa la conexión e inténtalo otra vez.');
       }
-    };
-    xhr.onerror = () => { up.classList.remove('show'); toast('Error de conexión al subir.'); };
-    xhr.send(form);
+    }
+
+    updateUI(0);
+    sendBatch(0);
   }
 
   // ---- Render de items ----
